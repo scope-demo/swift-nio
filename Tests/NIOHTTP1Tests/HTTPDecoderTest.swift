@@ -832,4 +832,75 @@ class HTTPDecoderTest: XCTestCase {
         XCTAssertEqual(["channelReadComplete", "write", "flush", "channelRead", "errorCaught"], eventCounter.allTriggeredEvents())
         XCTAssertNoThrow(XCTAssertTrue(try channel.finish().isClean))
     }
+
+    func testRefusesRequestSmugglingAttempt() throws {
+        XCTAssertNoThrow(try channel.pipeline.addHandler(ByteToMessageHandler(HTTPRequestDecoder())).wait())
+
+        // This is a request smuggling attempt caused by duplicating the Transfer-Encoding and Content-Length headers.
+        var buffer = channel.allocator.buffer(capacity: 256)
+        buffer.writeString("POST /foo HTTP/1.1\r\n" +
+                           "Host: localhost\r\n" +
+                           "Content-length: 1\r\n" +
+                           "Transfer-Encoding: gzip, chunked\r\n\r\n" +
+                           "3\r\na=1\r\n0\r\n\r\n")
+
+        do {
+            try channel.writeInbound(buffer)
+            XCTFail("Did not error")
+        } catch HTTPParserError.unexpectedContentLength {
+            // ok
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+
+        loop.run()
+    }
+
+    func testTrimsTrailingOWS() throws {
+        XCTAssertNoThrow(try channel.pipeline.addHandler(ByteToMessageHandler(HTTPRequestDecoder())).wait())
+
+        var buffer = channel.allocator.buffer(capacity: 64)
+        buffer.writeStaticString("GET / HTTP/1.1\r\nHost: localhost\r\nFoo: bar \r\nBaz: Boz\r\n\r\n")
+
+        XCTAssertNoThrow(try channel.writeInbound(buffer))
+        let request = try assertNoThrowWithValue(channel.readInbound(as: HTTPServerRequestPart.self))
+        guard case .some(.head(let head)) = request else {
+            XCTFail("Unexpected first message: \(String(describing: request))")
+            return
+        }
+        XCTAssertEqual(head.headers[canonicalForm: "Foo"], ["bar"])
+        guard case .some(.end) = try assertNoThrowWithValue(channel.readInbound(as: HTTPServerRequestPart.self)) else {
+            XCTFail("Unexpected last message")
+            return
+        }
+    }
+
+    func testMassiveChunkDoesNotBufferAndGivesUsHoweverMuchIsAvailable() {
+        XCTAssertNoThrow(try self.channel.pipeline.addHandler(ByteToMessageHandler(HTTPRequestDecoder())).wait())
+
+        var buffer = self.channel.allocator.buffer(capacity: 64)
+        buffer.writeString("POST / HTTP/1.1\r\nHost: localhost\r\ntransfer-encoding: chunked\r\n\r\n" +
+                           "FFFFFFFFFFFFF\r\nfoo")
+
+        XCTAssertNoThrow(try self.channel.writeInbound(buffer))
+
+        var maybeHead: HTTPServerRequestPart?
+        var maybeBodyChunk: HTTPServerRequestPart?
+
+        XCTAssertNoThrow(maybeHead = try self.channel.readInbound())
+        XCTAssertNoThrow(maybeBodyChunk = try self.channel.readInbound())
+        XCTAssertNoThrow(XCTAssertNil(try self.channel.readInbound(as: HTTPServerRequestPart.self)))
+
+        guard case .some(.head(let head)) = maybeHead, case .some(.body(let body)) = maybeBodyChunk else {
+            XCTFail("didn't receive head & body")
+            return
+        }
+
+        XCTAssertEqual(.POST, head.method)
+        XCTAssertEqual("foo", String(decoding: body.readableBytesView, as: Unicode.UTF8.self))
+
+        XCTAssertThrowsError(try self.channel.finish()) { error in
+            XCTAssertEqual(.invalidEOFState, error as? HTTPParserError)
+        }
+    }
 }

@@ -1637,7 +1637,7 @@ class ByteBufferTest: XCTestCase {
 
     func testLargeSliceBegin16MBIsOkayAndDoesNotCopy() throws {
         var fourMBBuf = self.allocator.buffer(capacity: 4 * 1024 * 1024)
-        fourMBBuf.writeBytes(repeatElement(0xff, count: fourMBBuf.capacity))
+        fourMBBuf.writeBytes(Array<UInt8>(repeating: 0xff, count: fourMBBuf.capacity))
         let totalBufferSize = 5 * fourMBBuf.readableBytes
         XCTAssertEqual(4 * 1024 * 1024, fourMBBuf.readableBytes)
         var buf = self.allocator.buffer(capacity: totalBufferSize)
@@ -1674,7 +1674,7 @@ class ByteBufferTest: XCTestCase {
 
     func testLargeSliceBeginMoreThan16MBIsOkay() throws {
         var fourMBBuf = self.allocator.buffer(capacity: 4 * 1024 * 1024)
-        fourMBBuf.writeBytes(repeatElement(0xff, count: fourMBBuf.capacity))
+        fourMBBuf.writeBytes(Array<UInt8>(repeating: 0xff, count: fourMBBuf.capacity))
         let totalBufferSize = 5 * fourMBBuf.readableBytes + 1
         XCTAssertEqual(4 * 1024 * 1024, fourMBBuf.readableBytes)
         var buf = self.allocator.buffer(capacity: totalBufferSize)
@@ -1939,6 +1939,34 @@ class ByteBufferTest: XCTestCase {
         XCTAssertEqual([], self.buf.readBytes(length: self.buf.readableBytes))
     }
 
+    func testBufferViewFirstIndex() {
+        self.buf.clear()
+        self.buf.writeBytes(Array(repeating: UInt8(0x4E), count: 1024))
+        self.buf.setBytes([UInt8(0x59)], at: 1000)
+        self.buf.setBytes([UInt8(0x59)], at: 1001)
+        self.buf.setBytes([UInt8(0x59)], at: 1022)
+        self.buf.setBytes([UInt8(0x59)], at: 3)
+        self.buf.setBytes([UInt8(0x3F)], at: 1023)
+        self.buf.setBytes([UInt8(0x3F)], at: 2)
+        let view = self.buf.viewBytes(at: 5, length: 1010)
+        XCTAssertEqual(1000, view?.firstIndex(of: UInt8(0x59)))
+        XCTAssertNil(view?.firstIndex(of: UInt8(0x3F)))
+    }
+
+    func testBufferViewLastIndex() {
+        self.buf.clear()
+        self.buf.writeBytes(Array(repeating: UInt8(0x4E), count: 1024))
+        self.buf.setBytes([UInt8(0x59)], at: 1000)
+        self.buf.setBytes([UInt8(0x59)], at: 1001)
+        self.buf.setBytes([UInt8(0x59)], at: 1022)
+        self.buf.setBytes([UInt8(0x59)], at: 3)
+        self.buf.setBytes([UInt8(0x3F)], at: 1023)
+        self.buf.setBytes([UInt8(0x3F)], at: 2)
+        let view = self.buf.viewBytes(at: 5, length: 1010)
+        XCTAssertEqual(1001, view?.lastIndex(of: UInt8(0x59)))
+        XCTAssertNil(view?.lastIndex(of: UInt8(0x3F)))
+    }
+
     func testByteBuffersCanBeInitializedFromByteBufferViews() throws {
         self.buf.writeString("hello")
 
@@ -2041,6 +2069,59 @@ class ByteBufferTest: XCTestCase {
             XCTAssertNotEqual(buf.capacity, oldCapacity)
             XCTAssertNotEqual(oldPtrVal, newPtrVal)
         }
+    }
+
+    func testReserveCapacityWithMinimumWritableBytesWhenNotEnoughWritableBytes() {
+        // Ensure we have a non-empty buffer since the writer index is involved here.
+        self.buf.writeBytes((UInt8.min...UInt8.max))
+
+        let writableBytes = self.buf.writableBytes
+        self.buf.reserveCapacity(minimumWritableBytes: writableBytes + 1)
+        XCTAssertGreaterThanOrEqual(self.buf.writableBytes, writableBytes + 1)
+    }
+
+    func testReserveCapacityWithMinimumWritableBytesWhenEnoughWritableBytes() {
+        // Ensure we have a non-empty buffer since the writer index is involved here.
+        self.buf.writeBytes((UInt8.min...UInt8.max))
+
+        // Ensure we have some space.
+        self.buf.reserveCapacity(minimumWritableBytes: 5)
+
+        let oldPtrVal = self.buf.withVeryUnsafeBytes {
+            UInt(bitPattern: $0.baseAddress!)
+        }
+
+        let writableBytes = self.buf.writableBytes
+        self.buf.reserveCapacity(minimumWritableBytes: writableBytes - 1)
+
+        let newPtrVal = self.buf.withVeryUnsafeBytes {
+            UInt(bitPattern: $0.baseAddress!)
+        }
+
+        XCTAssertEqual(self.buf.writableBytes, writableBytes)
+        XCTAssertEqual(oldPtrVal, newPtrVal)
+    }
+
+    func testReserveCapacityWithMinimumWritableBytesWhenSameWritableBytes() {
+        // Ensure we have a non-empty buffer since the writer index is involved here.
+        self.buf.writeBytes((UInt8.min...UInt8.max))
+
+        // Ensure we have some space.
+        self.buf.reserveCapacity(minimumWritableBytes: 5)
+
+        let oldPtrVal = self.buf.withVeryUnsafeBytes {
+            UInt(bitPattern: $0.baseAddress!)
+        }
+
+        let writableBytes = self.buf.writableBytes
+        self.buf.reserveCapacity(minimumWritableBytes: writableBytes)
+
+        let newPtrVal = self.buf.withVeryUnsafeBytes {
+            UInt(bitPattern: $0.baseAddress!)
+        }
+
+        XCTAssertEqual(self.buf.writableBytes, writableBytes)
+        XCTAssertEqual(oldPtrVal, newPtrVal)
     }
 
     func testReadWithFunctionsThatReturnNumberOfReadBytesAreDiscardable() {

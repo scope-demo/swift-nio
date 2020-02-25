@@ -458,6 +458,17 @@ public struct ByteBuffer {
         }
     }
 
+    /// Reserves enough space to write at least the specified number of bytes.
+    ///
+    /// This method will ensure that the buffer has enough writable space for at least as many bytes
+    /// as requested. If the buffer already has space to write the requested number of bytes, this
+    /// method will be a no-op.
+    ///
+    /// - Parameter minimumWritableBytes: The minimum number of writable bytes this buffer must have.
+    public mutating func reserveCapacity(minimumWritableBytes: Int) {
+        return self.reserveCapacity(self.writerIndex + minimumWritableBytes)
+    }
+
     @usableFromInline
     mutating func _copyStorageAndRebaseIfNeeded() {
         if !isKnownUniquelyReferenced(&self._storage) {
@@ -513,9 +524,9 @@ public struct ByteBuffer {
     @inlinable
     public mutating func writeWithUnsafeMutableBytes(minimumWritableBytes: Int, _ body: (UnsafeMutableRawBufferPointer) throws -> Int) rethrows -> Int {
         if minimumWritableBytes > 0 {
-            self.reserveCapacity(self.writerIndex + minimumWritableBytes)
+            self.reserveCapacity(minimumWritableBytes: minimumWritableBytes)
         }
-        let bytesWritten = try self.withUnsafeMutableWritableBytes(body)
+        let bytesWritten = try self.withUnsafeMutableWritableBytes({ try body($0) })
         self._moveWriterIndex(to: self._writerIndex + _toIndex(bytesWritten))
         return bytesWritten
     }
@@ -524,7 +535,7 @@ public struct ByteBuffer {
     @discardableResult
     @inlinable
     public mutating func writeWithUnsafeMutableBytes(_ body: (UnsafeMutableRawBufferPointer) throws -> Int) rethrows -> Int {
-        return try self.writeWithUnsafeMutableBytes(minimumWritableBytes: 0, body)
+        return try self.writeWithUnsafeMutableBytes(minimumWritableBytes: 0, { try body($0) })
     }
 
     /// This vends a pointer to the storage of the `ByteBuffer`. It's marked as _very unsafe_ because it might contain
