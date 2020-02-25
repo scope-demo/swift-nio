@@ -16,8 +16,11 @@ services:
     depends_on: [runtime-setup]
     volumes:
       - ~/.ssh:/root/.ssh
-      - ..:/code
+      - ..:/code:z
     working_dir: /code
+    cap_drop:
+      - CAP_NET_RAW
+      - CAP_NET_BIND_SERVICE
 
   sanity:
     <<: *common
@@ -29,11 +32,11 @@ services:
 
   integration-tests:
     <<: *common
-    command: /bin/bash -xcl "./scripts/integration_tests.sh"
+    command: /bin/bash -xcl "./scripts/integration_tests.sh $${INTEGRATION_TESTS_ARG-}"
 
   test:
     <<: *common
-    command: /bin/bash -xcl "swift test -Xswiftc -warnings-as-errors $${SANITIZER_ARG-} && ./scripts/integration_tests.sh"
+    command: /bin/bash -xcl "swift test -Xswiftc -warnings-as-errors $${SANITIZER_ARG-} && ./scripts/integration_tests.sh $${INTEGRATION_TESTS_ARG-}"
 
   performance-test:
     <<: *common

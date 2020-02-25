@@ -45,23 +45,23 @@ extension ipv6_mreq { // http://lkml.iu.edu/hypermail/linux/kernel/0106.1/0080.h
 #endif
 
 // Declare aliases to share more code and not need to repeat #if #else blocks
-private let sysClose: @convention(c) (CInt) -> CInt = close
-private let sysShutdown: @convention(c) (CInt, CInt) -> CInt = shutdown
-private let sysBind: @convention(c) (CInt, UnsafePointer<sockaddr>?, socklen_t) -> CInt = bind
-private let sysFcntl: @convention(c) (CInt, CInt, CInt) -> CInt = fcntl
-private let sysSocket: @convention(c) (CInt, CInt, CInt) -> CInt = socket
-private let sysSetsockopt: @convention(c) (CInt, CInt, CInt, UnsafeRawPointer?, socklen_t) -> CInt = setsockopt
-private let sysGetsockopt: @convention(c) (CInt, CInt, CInt, UnsafeMutableRawPointer?, UnsafeMutablePointer<socklen_t>?) -> CInt = getsockopt
-private let sysListen: @convention(c) (CInt, CInt) -> CInt = listen
-private let sysAccept: @convention(c) (CInt, UnsafeMutablePointer<sockaddr>?, UnsafeMutablePointer<socklen_t>?) -> CInt = accept
-private let sysConnect: @convention(c) (CInt, UnsafePointer<sockaddr>?, socklen_t) -> CInt = connect
-private let sysOpen: @convention(c) (UnsafePointer<CChar>, CInt) -> CInt = open
-private let sysOpenWithMode: @convention(c) (UnsafePointer<CChar>, CInt, mode_t) -> CInt = open
-private let sysWrite: @convention(c) (CInt, UnsafeRawPointer?, size_t) -> ssize_t = write
-private let sysRead: @convention(c) (CInt, UnsafeMutableRawPointer?, size_t) -> ssize_t = read
-private let sysPread: @convention(c) (CInt, UnsafeMutableRawPointer?, size_t, off_t) -> ssize_t = pread
-private let sysLseek: @convention(c) (CInt, off_t, CInt) -> off_t = lseek
-private let sysPoll: @convention(c) (UnsafeMutablePointer<pollfd>?, nfds_t, Int32) -> CInt = poll
+private let sysClose = close
+private let sysShutdown = shutdown
+private let sysBind = bind
+private let sysFcntl: (CInt, CInt, CInt) -> CInt = fcntl
+private let sysSocket = socket
+private let sysSetsockopt = setsockopt
+private let sysGetsockopt = getsockopt
+private let sysListen = listen
+private let sysAccept = accept
+private let sysConnect = connect
+private let sysOpen: (UnsafePointer<CChar>, CInt) -> CInt = open
+private let sysOpenWithMode: (UnsafePointer<CChar>, CInt, mode_t) -> CInt = open
+private let sysWrite = write
+private let sysRead = read
+private let sysPread = pread
+private let sysLseek = lseek
+private let sysPoll = poll
 #if os(Android)
 func sysRecvFrom_wrapper(sockfd: CInt, buf: UnsafeMutableRawPointer, len: CLong, flags: CInt, src_addr: UnsafeMutablePointer<sockaddr>, addrlen: UnsafeMutablePointer<socklen_t>) -> CLong {
     return recvfrom(sockfd, buf, len, flags, src_addr, addrlen) // src_addr is 'UnsafeMutablePointer', but it need to be 'UnsafePointer'
@@ -108,14 +108,14 @@ private func isBlacklistedErrno(_ code: Int32) -> Bool {
     }
 }
 
-private func preconditionIsNotBlacklistedErrno(err: CInt, where function: StaticString) -> Void {
+private func preconditionIsNotBlacklistedErrno(err: CInt, where function: String) -> Void {
     // strerror is documented to return "Unknown error: ..." for illegal value so it won't ever fail
     precondition(!isBlacklistedErrno(err), "blacklisted errno \(err) \(String(cString: strerror(err)!)) in \(function))")
 }
 
 /* Sorry, we really try hard to not use underscored attributes. In this case however we seem to break the inlining threshold which makes a system call take twice the time, ie. we need this exception. */
 @inline(__always)
-internal func wrapSyscallMayBlock<T: FixedWidthInteger>(where function: StaticString = #function, _ body: () throws -> T) throws -> IOResult<T> {
+internal func wrapSyscallMayBlock<T: FixedWidthInteger>(where function: String = #function, _ body: () throws -> T) throws -> IOResult<T> {
     while true {
         let res = try body()
         if res == -1 {
@@ -127,7 +127,7 @@ internal func wrapSyscallMayBlock<T: FixedWidthInteger>(where function: StaticSt
                 return .wouldBlock(0)
             default:
                 preconditionIsNotBlacklistedErrno(err: err, where: function)
-                throw IOError(errnoCode: err, function: function)
+                throw IOError(errnoCode: err, reason: function)
             }
 
         }
@@ -138,7 +138,7 @@ internal func wrapSyscallMayBlock<T: FixedWidthInteger>(where function: StaticSt
 /* Sorry, we really try hard to not use underscored attributes. In this case however we seem to break the inlining threshold which makes a system call take twice the time, ie. we need this exception. */
 @inline(__always)
 @discardableResult
-internal func wrapSyscall<T: FixedWidthInteger>(where function: StaticString = #function, _ body: () throws -> T) throws -> T {
+internal func wrapSyscall<T: FixedWidthInteger>(where function: String = #function, _ body: () throws -> T) throws -> T {
     while true {
         let res = try body()
         if res == -1 {
@@ -147,7 +147,7 @@ internal func wrapSyscall<T: FixedWidthInteger>(where function: StaticString = #
                 continue
             }
             preconditionIsNotBlacklistedErrno(err: err, where: function)
-            throw IOError(errnoCode: err, function: function)
+            throw IOError(errnoCode: err, reason: function)
         }
         return res
     }
@@ -155,7 +155,7 @@ internal func wrapSyscall<T: FixedWidthInteger>(where function: StaticString = #
 
 /* Sorry, we really try hard to not use underscored attributes. In this case however we seem to break the inlining threshold which makes a system call take twice the time, ie. we need this exception. */
 @inline(__always)
-internal func wrapErrorIsNullReturnCall<T>(where function: StaticString = #function, _ body: () throws -> T?) throws -> T {
+internal func wrapErrorIsNullReturnCall<T>(where function: String = #function, _ body: () throws -> T?) throws -> T {
     while true {
         guard let res = try body() else {
             let err = errno
@@ -163,7 +163,7 @@ internal func wrapErrorIsNullReturnCall<T>(where function: StaticString = #funct
                 continue
             }
             preconditionIsNotBlacklistedErrno(err: err, where: function)
-            throw IOError(errnoCode: err, function: function)
+            throw IOError(errnoCode: err, reason: function)
         }
         return res
     }
@@ -246,7 +246,7 @@ internal enum Posix {
             //     - https://lwn.net/Articles/576478/
             if err != EINTR {
                 preconditionIsNotBlacklistedErrno(err: err, where: #function)
-                throw IOError(errnoCode: err, function: "close")
+                throw IOError(errnoCode: err, reason: "close")
             }
         }
     }

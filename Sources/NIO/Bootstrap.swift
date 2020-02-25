@@ -172,6 +172,7 @@ public final class ServerBootstrap {
         return bind0 { address }
     }
 
+#if !os(Windows)
     /// Bind the `ServerSocketChannel` to a UNIX Domain Socket.
     ///
     /// - parameters:
@@ -181,6 +182,7 @@ public final class ServerBootstrap {
             try SocketAddress(unixDomainSocketPath: unixDomainSocketPath)
         }
     }
+#endif
 
     /// Use the existing bound socket file descriptor.
     ///
@@ -233,12 +235,12 @@ public final class ServerBootstrap {
         }
 
         return eventLoop.submit {
-            // We need to hop to `eventLoop` as the user might have returned a future from a different `EventLoop`.
-            return serverChannelInit(serverChannel).hop(to: eventLoop).flatMap {
-                serverChannel.pipeline.addHandler(AcceptHandler(childChannelInitializer: childChannelInit,
-                                                                childChannelOptions: childChannelOptions))
+            serverChannelOptions.applyAllChannelOptions(to: serverChannel).flatMap {
+                serverChannelInit(serverChannel)
             }.flatMap {
-                serverChannelOptions.applyAllChannelOptions(to: serverChannel)
+                serverChannel.pipeline.addHandler(AcceptHandler(childChannelInitializer: childChannelInit,
+                                                                childChannelOptions: childChannelOptions),
+                                                  name: "AcceptHandler")
             }.flatMap {
                 register(eventLoop, serverChannel)
             }.map {
@@ -509,6 +511,7 @@ public final class ClientBootstrap: NIOTCPClientBootstrap {
         }
     }
 
+#if !os(Windows)
     /// Specify the `unixDomainSocket` path to connect to for the UDS `Channel` that will be established.
     ///
     /// - parameters:
@@ -522,6 +525,7 @@ public final class ClientBootstrap: NIOTCPClientBootstrap {
             return group.next().makeFailedFuture(error)
         }
     }
+#endif
 
     /// Use the existing connected socket file descriptor.
     ///
@@ -540,10 +544,10 @@ public final class ClientBootstrap: NIOTCPClientBootstrap {
 
         func setupChannel() -> EventLoopFuture<Channel> {
             eventLoop.assertInEventLoop()
-            // We need to hop to `eventLoop` as the user might have returned a future from a different `EventLoop`.
-            return channelInitializer(channel).hop(to: eventLoop).flatMap {
-                self._channelOptions.applyAllChannelOptions(to: channel)
+            return self._channelOptions.applyAllChannelOptions(to: channel).flatMap {
+                channelInitializer(channel)
             }.flatMap {
+                eventLoop.assertInEventLoop()
                 let promise = eventLoop.makePromise(of: Void.self)
                 channel.registerAlreadyConfigured0(promise: promise)
                 return promise.futureResult
@@ -578,11 +582,11 @@ public final class ClientBootstrap: NIOTCPClientBootstrap {
         @inline(__always)
         func setupChannel() -> EventLoopFuture<Channel> {
             eventLoop.assertInEventLoop()
-            // We need to hop to `eventLoop` as the user might have returned a future from a different `EventLoop`.
-            return channelInitializer(channel).hop(to: eventLoop).flatMap {
-                channelOptions.applyAllChannelOptions(to: channel)
+            return channelOptions.applyAllChannelOptions(to: channel).flatMap {
+                channelInitializer(channel)
             }.flatMap {
-                channel.registerAndDoSynchronously(body)
+                eventLoop.assertInEventLoop()
+                return channel.registerAndDoSynchronously(body)
             }.map {
                 channel
             }.flatMapError { error in
@@ -694,6 +698,7 @@ public final class DatagramBootstrap {
         return bind0 { address }
     }
 
+#if !os(Windows)
     /// Bind the `DatagramChannel` to a UNIX Domain Socket.
     ///
     /// - parameters:
@@ -703,6 +708,7 @@ public final class DatagramBootstrap {
             return try SocketAddress(unixDomainSocketPath: unixDomainSocketPath)
         }
     }
+#endif
 
     private func bind0(_ makeSocketAddress: () throws -> SocketAddress) -> EventLoopFuture<Channel> {
         let address: SocketAddress
@@ -736,12 +742,11 @@ public final class DatagramBootstrap {
 
         func setupChannel() -> EventLoopFuture<Channel> {
             eventLoop.assertInEventLoop()
-            // We need to hop to `eventLoop` as the user might have returned a future from a different `EventLoop`.
-            return channelInitializer(channel).hop(to: eventLoop).flatMap {
-                eventLoop.assertInEventLoop()
-                return channelOptions.applyAllChannelOptions(to: channel)
+            return channelOptions.applyAllChannelOptions(to: channel).flatMap {
+                channelInitializer(channel)
             }.flatMap {
-                registerAndBind(eventLoop, channel)
+                eventLoop.assertInEventLoop()
+                return registerAndBind(eventLoop, channel)
             }.map {
                 channel
             }.flatMapError { error in
@@ -851,10 +856,10 @@ public final class NIOPipeBootstrap {
 
         func setupChannel() -> EventLoopFuture<Channel> {
             eventLoop.assertInEventLoop()
-            // We need to hop to `eventLoop` as the user might have returned a future from a different `EventLoop`.
-            return channelInitializer(channel).hop(to: eventLoop).flatMap {
-                self._channelOptions.applyAllChannelOptions(to: channel)
+            return self._channelOptions.applyAllChannelOptions(to: channel).flatMap {
+                channelInitializer(channel)
             }.flatMap {
+                eventLoop.assertInEventLoop()
                 let promise = eventLoop.makePromise(of: Void.self)
                 channel.registerAlreadyConfigured0(promise: promise)
                 return promise.futureResult

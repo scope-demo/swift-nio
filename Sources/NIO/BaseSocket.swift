@@ -52,10 +52,12 @@ extension UnsafeMutablePointer where Pointee == sockaddr {
             return self.withMemoryRebound(to: sockaddr_in6.self, capacity: 1) {
                 SocketAddress($0.pointee, host: $0.pointee.addressDescription())
             }
+#if !os(Windows)
         case Posix.AF_UNIX:
             return self.withMemoryRebound(to: sockaddr_un.self, capacity: 1) {
                 SocketAddress($0.pointee)
             }
+#endif
         default:
             return nil
         }
@@ -110,6 +112,7 @@ extension sockaddr_in6: SockAddrProtocol {
     }
 }
 
+#if !os(Windows)
 extension sockaddr_un: SockAddrProtocol {
     mutating func withSockAddr<R>(_ body: (UnsafePointer<sockaddr>, Int) throws -> R) rethrows -> R {
         var me = self
@@ -125,6 +128,7 @@ extension sockaddr_un: SockAddrProtocol {
         }
     }
 }
+#endif
 
 extension sockaddr_storage: SockAddrProtocol {
     mutating func withSockAddr<R>(_ body: (UnsafePointer<sockaddr>, Int) throws -> R) rethrows -> R {
@@ -174,6 +178,7 @@ extension sockaddr_storage {
         }
     }
 
+#if !os(Windows)
     /// Converts the `socketaddr_storage` to a `sockaddr_un`.
     ///
     /// This will crash if `ss_family` != AF_UNIX!
@@ -185,6 +190,7 @@ extension sockaddr_storage {
             }
         }
     }
+#endif
 
     /// Converts the `socketaddr_storage` to a `SocketAddress`.
     mutating func convert() -> SocketAddress {
@@ -225,7 +231,7 @@ class BaseSocket: Selectable, BaseSocketProtocol {
     ///
     /// - returns: The local bound address.
     /// - throws: An `IOError` if the retrieval of the address failed.
-    final func localAddress() throws -> SocketAddress {
+    func localAddress() throws -> SocketAddress {
         return try get_addr { try Posix.getsockname(socket: $0, address: $1, addressLength: $2) }
     }
 
@@ -233,7 +239,7 @@ class BaseSocket: Selectable, BaseSocketProtocol {
     ///
     /// - returns: The connected address.
     /// - throws: An `IOError` if the retrieval of the address failed.
-    final func remoteAddress() throws -> SocketAddress {
+    func remoteAddress() throws -> SocketAddress {
         return try get_addr { try Posix.getpeername(socket: $0, address: $1, addressLength: $2) }
     }
 
@@ -308,11 +314,15 @@ class BaseSocket: Selectable, BaseSocketProtocol {
     init(descriptor: CInt) throws {
         precondition(descriptor >= 0, "invalid file descriptor")
         self.descriptor = descriptor
-        try self.ignoreSIGPIPE(descriptor: descriptor)
+        try self.ignoreSIGPIPE()
     }
 
     deinit {
         assert(!self.isOpen, "leak of open BaseSocket")
+    }
+
+    func ignoreSIGPIPE() throws {
+        try BaseSocket.ignoreSIGPIPE(descriptor: self.descriptor)
     }
 
     /// Set the socket as non-blocking.
@@ -394,13 +404,15 @@ class BaseSocket: Selectable, BaseSocketProtocol {
             switch address {
             case .v4(let address):
                 var addr = address.address
-                try addr.withSockAddr(doBind)
+                try addr.withSockAddr({ try doBind(ptr: $0, bytes: $1) })
             case .v6(let address):
                 var addr = address.address
-                try addr.withSockAddr(doBind)
+                try addr.withSockAddr({ try doBind(ptr: $0, bytes: $1) })
+#if !os(Windows)
             case .unixDomainSocket(let address):
                 var addr = address.address
-                try addr.withSockAddr(doBind)
+                try addr.withSockAddr({ try doBind(ptr: $0, bytes: $1) })
+#endif
             }
         }
     }
@@ -411,11 +423,20 @@ class BaseSocket: Selectable, BaseSocketProtocol {
     ///
     /// - throws: An `IOError` if the operation failed.
     func close() throws {
-        try withUnsafeFileDescriptor { fd in
-            try Posix.close(descriptor: fd)
-        }
+        try Posix.close(descriptor: try self.takeDescriptorOwnership())
+    }
 
-        self.descriptor = -1
+    /// Takes the file descriptor's ownership.
+    ///
+    /// After this call, `BaseSocket` considers itself to be closed and the caller is responsible for actually closing
+    /// the underlying file descriptor.
+    ///
+    /// - throws: An `IOError` if the operation failed.
+    final func takeDescriptorOwnership() throws -> CInt {
+        return try withUnsafeFileDescriptor { fd in
+            self.descriptor = -1
+            return fd
+        }
     }
 }
 
