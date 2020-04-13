@@ -35,8 +35,8 @@ extension ByteBuffer {
 final class SocketChannel: BaseStreamSocketChannel<Socket> {
     private var connectTimeout: TimeAmount? = nil
 
-    init(eventLoop: SelectableEventLoop, protocolFamily: Int32) throws {
-        let socket = try Socket(protocolFamily: protocolFamily, type: Posix.SOCK_STREAM, setNonBlocking: true)
+    init(eventLoop: SelectableEventLoop, protocolFamily: NIOBSDSocket.ProtocolFamily) throws {
+        let socket = try Socket(protocolFamily: protocolFamily, type: .stream, setNonBlocking: true)
         try super.init(socket: socket, parent: nil, eventLoop: eventLoop, recvAllocator: AdaptiveRecvByteBufferAllocator())
     }
 
@@ -135,7 +135,7 @@ final class ServerSocketChannel: BaseSocketChannel<ServerSocket> {
     // This is `Channel` API so must be thread-safe.
     override public var isWritable: Bool { return false }
 
-    convenience init(eventLoop: SelectableEventLoop, group: EventLoopGroup, protocolFamily: Int32) throws {
+    convenience init(eventLoop: SelectableEventLoop, group: EventLoopGroup, protocolFamily: NIOBSDSocket.ProtocolFamily) throws {
         try self.init(serverSocket: try ServerSocket(protocolFamily: protocolFamily, setNonBlocking: true), eventLoop: eventLoop, group: group)
     }
 
@@ -360,9 +360,9 @@ final class DatagramChannel: BaseSocketChannel<Socket> {
         }
     }
 
-    init(eventLoop: SelectableEventLoop, protocolFamily: Int32) throws {
+    init(eventLoop: SelectableEventLoop, protocolFamily: NIOBSDSocket.ProtocolFamily) throws {
         self.vectorReadManager = nil
-        let socket = try Socket(protocolFamily: protocolFamily, type: Posix.SOCK_DGRAM)
+        let socket = try Socket(protocolFamily: protocolFamily, type: .dgram)
         do {
             try socket.setNonBlocking()
         } catch let err {
@@ -733,7 +733,7 @@ extension DatagramChannel: MulticastChannel {
             return
         }
 
-        guard localAddress.protocolFamily == group.protocolFamily else {
+        guard localAddress.protocol == group.protocol else {
             promise?.fail(ChannelError.badMulticastGroupAddressFamily)
             return
         }

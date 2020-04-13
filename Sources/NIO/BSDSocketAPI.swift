@@ -13,10 +13,13 @@
 //===----------------------------------------------------------------------===//
 
 #if os(Windows)
+import let WinSDK.AF_INET
+import let WinSDK.AF_INET6
+import let WinSDK.AF_UNIX
+
 import let WinSDK.IPPROTO_IP
 import let WinSDK.IPPROTO_IPV6
 import let WinSDK.IPPROTO_TCP
-import let WinSDK.SOL_SOCKET
 
 import let WinSDK.IP_ADD_MEMBERSHIP
 import let WinSDK.IP_DROP_MEMBERSHIP
@@ -31,6 +34,10 @@ import let WinSDK.IPV6_MULTICAST_IF
 import let WinSDK.IPV6_MULTICAST_LOOP
 import let WinSDK.IPV6_V6ONLY
 
+import let WinSDK.PF_INET
+import let WinSDK.PF_INET6
+import let WinSDK.PF_UNIX
+
 import let WinSDK.TCP_NODELAY
 
 import let WinSDK.SO_ERROR
@@ -40,6 +47,11 @@ import let WinSDK.SO_RCVBUF
 import let WinSDK.SO_RCVTIMEO
 import let WinSDK.SO_REUSEADDR
 import let WinSDK.SO_REUSE_UNICASTPORT
+
+import let WinSDK.SOL_SOCKET
+
+import let WinSDK.SOCK_DGRAM
+import let WinSDK.SOCK_STREAM
 #elseif os(iOS) || os(macOS) || os(tvOS) || os(watchOS)
 import Darwin
 #else
@@ -47,6 +59,57 @@ import Glibc
 #endif
 
 public enum NIOBSDSocket {
+}
+
+extension NIOBSDSocket {
+    /// Specifies the type of socket.
+    internal struct SocketType: RawRepresentable {
+        public typealias RawValue = CInt
+        public var rawValue: RawValue
+        public init(rawValue: RawValue) {
+            self.rawValue = rawValue
+        }
+    }
+}
+
+extension NIOBSDSocket.SocketType: Equatable {
+}
+
+extension NIOBSDSocket.SocketType: Hashable {
+}
+
+extension NIOBSDSocket {
+    /// Specifies the addressing scheme that the socket can use.
+    public struct AddressFamily: RawRepresentable {
+        public typealias RawValue = CInt
+        public var rawValue: RawValue
+        public init(rawValue: RawValue) {
+            self.rawValue = rawValue
+        }
+    }
+}
+
+extension NIOBSDSocket.AddressFamily: Equatable {
+}
+
+extension NIOBSDSocket.AddressFamily: Hashable {
+}
+
+extension NIOBSDSocket {
+    /// Specifies the type of protocol that the socket can use.
+    public struct ProtocolFamily: RawRepresentable {
+        public typealias RawValue = CInt
+        public var rawValue: RawValue
+        public init(rawValue: RawValue) {
+            self.rawValue = rawValue
+        }
+    }
+}
+
+extension NIOBSDSocket.ProtocolFamily: Equatable {
+}
+
+extension NIOBSDSocket.ProtocolFamily: Hashable {
 }
 
 extension NIOBSDSocket {
@@ -81,6 +144,67 @@ extension NIOBSDSocket.Option: Equatable {
 }
 
 extension NIOBSDSocket.Option: Hashable {
+}
+
+// Address Family
+extension NIOBSDSocket.AddressFamily {
+    /// Address for IP version 4.
+    public static let inet: NIOBSDSocket.AddressFamily =
+            NIOBSDSocket.AddressFamily(rawValue: AF_INET)
+
+    /// Address for IP version 6.
+    public static let inet6: NIOBSDSocket.AddressFamily =
+            NIOBSDSocket.AddressFamily(rawValue: AF_INET6)
+
+    /// Unix local to host address.
+    public static let unix: NIOBSDSocket.AddressFamily =
+            NIOBSDSocket.AddressFamily(rawValue: AF_UNIX)
+}
+
+// Protocol Family
+extension NIOBSDSocket.ProtocolFamily {
+    /// IP network 4 protocol.
+    public static let inet: NIOBSDSocket.ProtocolFamily =
+            NIOBSDSocket.ProtocolFamily(rawValue: PF_INET)
+
+    /// IP network 6 protocol.
+    public static let inet6: NIOBSDSocket.ProtocolFamily =
+            NIOBSDSocket.ProtocolFamily(rawValue: PF_INET6)
+
+    /// UNIX local to the host.
+    public static let unix: NIOBSDSocket.ProtocolFamily =
+            NIOBSDSocket.ProtocolFamily(rawValue: PF_UNIX)
+}
+
+#if !os(Windows)
+    extension NIOBSDSocket.ProtocolFamily {
+        /// UNIX local to the host, alias for `PF_UNIX` (`.unix`)
+        public static let local: NIOBSDSocket.ProtocolFamily =
+                NIOBSDSocket.ProtocolFamily(rawValue: PF_LOCAL)
+    }
+#endif
+
+// Socket Types
+extension NIOBSDSocket.SocketType {
+    /// Supports datagrams, which are connectionless, unreliable messages of a
+    /// fixed (typically small) maximum length.
+    #if os(Linux)
+        internal static let dgram: NIOBSDSocket.SocketType =
+                NIOBSDSocket.SocketType(rawValue: CInt(SOCK_DGRAM.rawValue))
+    #else
+        internal static let dgram: NIOBSDSocket.SocketType =
+                NIOBSDSocket.SocketType(rawValue: SOCK_DGRAM)
+    #endif
+
+    /// Supports reliable, two-way, connection-based byte streams without
+    /// duplication of data and without preservation of boundaries.
+    #if os(Linux)
+        internal static let stream: NIOBSDSocket.SocketType =
+                NIOBSDSocket.SocketType(rawValue: CInt(SOCK_STREAM.rawValue))
+    #else
+        internal static let stream: NIOBSDSocket.SocketType =
+                NIOBSDSocket.SocketType(rawValue: SOCK_STREAM)
+    #endif
 }
 
 // Option Level

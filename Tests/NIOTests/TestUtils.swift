@@ -211,7 +211,7 @@ final class NonAcceptingServerSocket: ServerSocket {
     init(errors: [Int32]) throws {
         // Reverse so it's cheaper to remove errors.
         self.errors = errors.reversed()
-        try super.init(protocolFamily: AF_INET, setNonBlocking: true)
+        try super.init(protocolFamily: .inet, setNonBlocking: true)
     }
 
     override func accept(setNonBlocking: Bool) throws -> Socket? {
@@ -270,7 +270,7 @@ func resolverDebugInformation(eventLoop: EventLoop, host: String, previouslyRece
             return addr.addressDescription()
         }
     }
-    let res = GetaddrinfoResolver(loop: eventLoop, aiSocktype: Posix.SOCK_STREAM, aiProtocol: CInt(IPPROTO_TCP))
+    let res = GetaddrinfoResolver(loop: eventLoop, aiSocktype: .stream, aiProtocol: CInt(IPPROTO_TCP))
     let ipv6Results = try assertNoThrowWithValue(res.initiateAAAAQuery(host: host, port: 0).wait()).map(printSocketAddress)
     let ipv4Results = try assertNoThrowWithValue(res.initiateAQuery(host: host, port: 0).wait()).map(printSocketAddress)
 

@@ -26,10 +26,10 @@ protocol SockAddrProtocol {
 }
 
 /// Returns a description for the given address.
-internal func descriptionForAddress(family: sa_family_t, bytes: UnsafeRawPointer, length byteCount: Int) throws -> String {
+internal func descriptionForAddress(family: NIOBSDSocket.AddressFamily, bytes: UnsafeRawPointer, length byteCount: Int) throws -> String {
     var addressBytes: [Int8] = Array(repeating: 0, count: byteCount)
     return try addressBytes.withUnsafeMutableBufferPointer { (addressBytesPtr: inout UnsafeMutableBufferPointer<Int8>) -> String in
-        try Posix.inet_ntop(addressFamily: family,
+        try Posix.inet_ntop(addressFamily: sa_family_t(family.rawValue),
                             addressBytes: bytes,
                             addressDescription: addressBytesPtr.baseAddress!,
                             addressDescriptionLength: socklen_t(byteCount))
@@ -43,16 +43,16 @@ internal func descriptionForAddress(family: sa_family_t, bytes: UnsafeRawPointer
 extension UnsafeMutablePointer where Pointee == sockaddr {
     /// Converts the `sockaddr` to a `SocketAddress`.
     func convert() -> SocketAddress? {
-        switch pointee.sa_family {
-        case Posix.AF_INET:
+        switch NIOBSDSocket.AddressFamily(rawValue: CInt(pointee.sa_family)) {
+        case .inet:
             return self.withMemoryRebound(to: sockaddr_in.self, capacity: 1) {
                 SocketAddress($0.pointee, host: $0.pointee.addressDescription())
             }
-        case Posix.AF_INET6:
+        case .inet6:
             return self.withMemoryRebound(to: sockaddr_in6.self, capacity: 1) {
                 SocketAddress($0.pointee, host: $0.pointee.addressDescription())
             }
-        case Posix.AF_UNIX:
+        case .unix:
             return self.withMemoryRebound(to: sockaddr_un.self, capacity: 1) {
                 SocketAddress($0.pointee)
             }
@@ -81,7 +81,7 @@ extension sockaddr_in: SockAddrProtocol {
     mutating func addressDescription() -> String {
         return withUnsafePointer(to: &self.sin_addr) { addrPtr in
             // this uses inet_ntop which is documented to only fail if family is not AF_INET or AF_INET6 (or ENOSPC)
-            try! descriptionForAddress(family: Posix.AF_INET, bytes: addrPtr, length: Int(INET_ADDRSTRLEN))
+            try! descriptionForAddress(family: .inet, bytes: addrPtr, length: Int(INET_ADDRSTRLEN))
         }
     }
 }
@@ -105,7 +105,7 @@ extension sockaddr_in6: SockAddrProtocol {
     mutating func addressDescription() -> String {
         return withUnsafePointer(to: &self.sin6_addr) { addrPtr in
             // this uses inet_ntop which is documented to only fail if family is not AF_INET or AF_INET6 (or ENOSPC)
-            try! descriptionForAddress(family: Posix.AF_INET6, bytes: addrPtr, length: Int(INET6_ADDRSTRLEN))
+            try! descriptionForAddress(family: .inet6, bytes: addrPtr, length: Int(INET6_ADDRSTRLEN))
         }
     }
 }
@@ -154,7 +154,7 @@ extension sockaddr_storage {
     ///
     /// This will crash if `ss_family` != AF_INET!
     mutating func convert() -> sockaddr_in {
-        precondition(self.ss_family == Posix.AF_INET)
+        precondition(self.ss_family == NIOBSDSocket.AddressFamily.inet.rawValue)
         return withUnsafePointer(to: &self) {
             $0.withMemoryRebound(to: sockaddr_in.self, capacity: 1) {
                 $0.pointee
@@ -166,7 +166,7 @@ extension sockaddr_storage {
     ///
     /// This will crash if `ss_family` != AF_INET6!
     mutating func convert() -> sockaddr_in6 {
-        precondition(self.ss_family == Posix.AF_INET6)
+        precondition(self.ss_family == NIOBSDSocket.AddressFamily.inet6.rawValue)
         return withUnsafePointer(to: &self) {
             $0.withMemoryRebound(to: sockaddr_in6.self, capacity: 1) {
                 $0.pointee
@@ -178,7 +178,7 @@ extension sockaddr_storage {
     ///
     /// This will crash if `ss_family` != AF_UNIX!
     mutating func convert() -> sockaddr_un {
-        precondition(self.ss_family == Posix.AF_UNIX)
+        precondition(self.ss_family == NIOBSDSocket.AddressFamily.unix.rawValue)
         return withUnsafePointer(to: &self) {
             $0.withMemoryRebound(to: sockaddr_un.self, capacity: 1) {
                 $0.pointee
@@ -188,14 +188,14 @@ extension sockaddr_storage {
 
     /// Converts the `socketaddr_storage` to a `SocketAddress`.
     mutating func convert() -> SocketAddress {
-        switch self.ss_family {
-        case Posix.AF_INET:
+        switch NIOBSDSocket.AddressFamily(rawValue: CInt(self.ss_family)) {
+        case .inet:
             var sockAddr: sockaddr_in = self.convert()
             return SocketAddress(sockAddr, host: sockAddr.addressDescription())
-        case Posix.AF_INET6:
+        case .inet6:
             var sockAddr: sockaddr_in6 = self.convert()
             return SocketAddress(sockAddr, host: sockAddr.addressDescription())
-        case Posix.AF_UNIX:
+        case .unix:
             return SocketAddress(self.convert() as sockaddr_un)
         default:
             fatalError("unknown sockaddr family \(self.ss_family)")
@@ -252,15 +252,15 @@ class BaseSocket: BaseSocketProtocol {
     ///     - setNonBlocking: Set non-blocking mode on the socket.
     /// - returns: the file descriptor of the socket that was created.
     /// - throws: An `IOError` if creation of the socket failed.
-    static func makeSocket(protocolFamily: Int32, type: CInt, setNonBlocking: Bool = false) throws -> CInt {
-        var sockType = type
+    static func makeSocket(protocolFamily: NIOBSDSocket.ProtocolFamily, type: NIOBSDSocket.SocketType, setNonBlocking: Bool = false) throws -> CInt {
+        var sockType: CInt = type.rawValue
         #if os(Linux)
         if setNonBlocking {
-            sockType = type | Linux.SOCK_NONBLOCK
+            sockType = type.rawValue | Linux.SOCK_NONBLOCK
         }
         #endif
         let sock = try Posix.socket(domain: protocolFamily,
-                                    type: sockType,
+                                    type: NIOBSDSocket.SocketType(rawValue: sockType),
                                     protocol: 0)
         #if !os(Linux)
         if setNonBlocking {
@@ -273,7 +273,7 @@ class BaseSocket: BaseSocketProtocol {
             }
         }
         #endif
-        if protocolFamily == Posix.AF_INET6 {
+        if protocolFamily == .inet6 {
             var zero: Int32 = 0
             do {
                 try Posix.setsockopt(socket: sock, level: NIOBSDSocket.OptionLevel.ipv6.rawValue, optionName: NIOBSDSocket.Option.ipv6_v6only.rawValue, optionValue: &zero, optionLen: socklen_t(MemoryLayout.size(ofValue: zero)))
@@ -333,7 +333,7 @@ class BaseSocket: BaseSocketProtocol {
     ///     - value: The value for the option.
     /// - throws: An `IOError` if the operation failed.
     final func setOption<T>(level: NIOBSDSocket.OptionLevel, name: NIOBSDSocket.Option, value: T) throws {
-        if level == .tcp && name == .nodelay && (try? self.localAddress().protocolFamily) == Optional<Int32>.some(Int32(Posix.AF_UNIX)) {
+        if level == .tcp && name == .nodelay && (try? self.localAddress().protocol) == Optional<NIOBSDSocket.ProtocolFamily>.some(.unix) {
             // setting TCP_NODELAY on UNIX domain sockets will fail. Previously we had a bug where we would ignore
             // most socket options settings so for the time being we'll just ignore this. Let's revisit for NIO 2.0.
             return
