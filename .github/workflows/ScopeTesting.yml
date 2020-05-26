@@ -15,4 +15,6 @@ jobs:
           dsn: ${{ secrets.SCOPE_DSN }}
           platform: macos
           codePath: true
-          
+        env:
+          SCOPE_RUNNER_ENABLED: YES
+
